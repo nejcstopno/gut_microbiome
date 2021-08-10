@@ -1,9 +1,9 @@
 library(vegan)
 library(ggplot2)
-library(tidyverse)
+install.packages('tidyverse')
+library(tidyr)
 library(reshape2)
-
-setwd('~/OneDrive - Michigan State University/MSU/Ritam/')
+library(dplyr)
 
 otu_gut <- read.table('OTU_table.txt',sep='\t', header=T, row.names = 1)
 
@@ -14,45 +14,51 @@ tax_gut <- read.table('taxonomy.txt', sep='\t', header=T)
 tax_gut_filt <- tax_gut[!grepl("Mitochondria", tax_gut$taxonomy),]
 tax_gut_filt <- tax_gut_filt[!grepl("Chloroplast", tax_gut_filt$taxonomy),]
 tax_gut_filt <- tax_gut_filt[!grepl("Unassigned", tax_gut_filt$taxonomy),]
-tax_gut_filt <- tax_gut_filt[,-c(3,4)]
 
 tax_gut_filt <- tax_gut_filt %>%
   separate(taxonomy, into=c("Kingdom", "Phylum", "Class", 
                             "Order", "Family", "Genus", "Species"), sep=";", remove=T)
 tax_gut_filt[2:8] <- lapply(tax_gut_filt[2:8], function(x) gsub(".*__", "", x))
 
-tax_gut_filt[] = lapply(tax_gut_filt, blank2na, na.strings=c('','NA','na','N/A','n/a','NaN','nan'))
-lastValue <- function(x) tail(x[!is.na(x)], 1)
-last_taxons<- apply(tax_gut_filt, 1, lastValue)
-tax_gut_filt$last_taxon <- last_taxons
+#tax_gut_filt[] = lapply(tax_gut_filt, blank2na, na.strings=c('','NA','na','N/A','n/a','NaN','nan'))
+#lastValue <- function(x) tail(x[!is.na(x)], 1)
+#last_taxons<- apply(tax_gut_filt, 1, lastValue)
+#tax_gut_filt$last_taxon <- last_taxons
 head(tax_gut_filt)
-tax_gut_filt$final_names <- paste(tax_gut_filt$last_taxon, tax_gut_filt$OTUid, sep=' - ')
+#tax_gut_filt$final_names <- paste(tax_gut_filt$last_taxon, tax_gut_filt$OTUid, sep=' - ')
 
 otus_gut <- tax_gut_filt$OTUid
 otu_gut_filt <- otu_gut[rownames(otu_gut) %in% otus_gut,]
-rownames(otu_gut_filt)
 otu_gut <- otu_gut_filt
-map_gut <- map_gut[map_gut$time!=1,]
-otu_gut <- otu_gut[,colnames(otu_gut) %in% map_gut$Sample.Name]
+#map_gut <- map_gut[map_gut$time!=1,]
+map_ferret <- map_gut[map_gut$Animal == 'Ferret',]
+
+#otu_gut <- otu_gut[,colnames(otu_gut) %in% map_gut$Sample.Name]
+otu_ferret <- otu_gut[,colnames(otu_gut) %in% map_ferret$Sample.Name]
 
 # Order the samples
-otu_gut <- otu_gut[,order(colnames(otu_gut))]
+#otu_gut <- otu_gut[,order(colnames(otu_gut))]
 # Order the samples of the map the same way
-map_gut=map_gut[order(as.character(map_gut$Sample.Name)),]
+#map_gut=map_gut[order(as.character(map_gut$Sample.Name)),]
 # Check to make sure they all match with each other
-map_gut$Sample.Name==colnames(otu_gut)
+#map_gut$Sample.Name==colnames(otu_gut)
 
+otu_ferret <- otu_ferret[,order(colnames(otu_ferret))]
+map_ferret=map_ferret[order(as.character(map_ferret$Sample.Name)),]
+map_ferret$Sample.Name==colnames(otu_ferret)
 
-#Rarefying data to the sample with lowest reads (31255)
-rarecurve(t(otu_gut), step=20, label = FALSE)
-otu_gut <- otu_gut[rowSums(otu_gut)>0,]
-otu_gut_rare <- t(rrarefy(t(otu_gut), min(colSums(otu_gut)))) 
+#Rarefying data to the sample with lowest reads (17000)
+rarecurve(t(otu_ferret), step=20, label = FALSE)
+otu_ferret <- otu_ferret[rowSums(otu_ferret)>0,]
+otu_ferret_rare <- t(rrarefy(t(otu_ferret), 17000)) 
 
-s <- specnumber(otu_gut_rare,MARGIN=2)
-h <- vegan::diversity(t(otu_gut_rare), "shannon")
+#s <- specnumber(otu_gut_rare,MARGIN=2)
+#h <- vegan::diversity(t(otu_gut_rare), "shannon")
+s <- specnumber(otu_ferret_rare,MARGIN=2)
+h <- vegan::diversity(t(otu_ferret_rare), "shannon")
 pielou=h/log(s)
 
-map.div <- map_gut
+map.div <- map_ferret
 map.div$Richness <- s
 map.div$Shannon <- h
 map.div$Pielou <- pielou 
@@ -60,101 +66,167 @@ map.div$Pielou <- pielou
 map.alpha <- melt(map.div, id.vars=c("time","rep", "Animal", 'treatment', 'Sample.Name', 'cage'), 
                   measure.vars=c("Richness", "Shannon", "Pielou"))
 
-ggplot(map.alpha[map.alpha$variable=='Richness',], aes(y=value, x=as.factor(time), color=treatment, group=cage))+
-  xlab('Time (days)')+
-  geom_boxplot()+
-  facet_wrap(~Animal)+
+ggplot(map.alpha,aes(y=value, x=as.factor(time), color=treatment))+
   theme_bw()+
-  theme(axis.text.x=element_text(angle = 45, hjust = 1))
+  scale_color_manual(values = c('#00429d', '#93003a'), 
+                     breaks = c('Control', 'Infected')) +
+  geom_boxplot()+
+  facet_wrap(~variable, scale="free_y")+
+  xlab('Time (days)')
 
-#tidy(aov(value~cage* treatment, data=map.alpha[map.alpha$variable=="Richness" & map.alpha$Animal=="Ferret",]))
-#no stat differences between tretment and control in Ferret
-#PCoA
-str(map_gut)
-gut.dist <- vegdist(t(otu_gut_rare), method="bray")
+aov.richness <- aov(value ~ time+treatment+cage+time*treatment, #replace Richness with Shannon
+                      data = map.alpha[map.alpha$variable == 'Pielou',]) 
+aov.shannon <- aov(value ~ treatment, #replace Richness with Shannon
+                    data = map.alpha[map.alpha$variable == 'Shannon',])
+aov.pielou <- aov(value ~ treatment, #replace Richness with Shannon
+                    data = map.alpha[map.alpha$variable == 'Pielou',])
+summary(aov.richness)
+summary(aov.shannon)
+summary(aov.pielou)
+
+#' no stat differences between treatment and control when considering richness but
+#' strong difference with Shannon (p=0.0001) and Pielou (p=0.0001)
+install.packages('rstatix')
+library(rstatix)
+
+stat.test.rich <- map.alpha %>%
+  group_by(time) %>%
+  filter(variable == 'Richness') %>%
+  t_test(value ~ treatment) %>%
+  adjust_pvalue(method = "BH") %>%
+  add_significance()
+stat.test.rich
+
+stat.test.shannon <- map.alpha %>%
+  group_by(time) %>%
+  filter(variable == 'Shannon') %>%
+  t_test(value ~ treatment) %>%
+  adjust_pvalue(method = "BH") %>%
+  add_significance()
+stat.test.shannon
+
+stat.test.pielou <- map.alpha %>%
+  group_by(time) %>%
+  filter(variable == 'Pielou') %>%
+  t_test(value ~ treatment) %>%
+  adjust_pvalue(method = "BH") 
+stat.test.pielou
+
+#PCoA full dataset (time 1 and 3)
+gut.dist <- vegdist(t(otu_ferret_rare), method="bray")
 gut.pcoa <- cmdscale(gut.dist, eig=TRUE)
 
-gut_envfit <- envfit(gut.pcoa, map_gut)
+gut_envfit <- envfit(gut.pcoa, map_ferret)
 
-ax1.gut<- gut.pcoa$eig[1]/sum(gut.pcoa$eig)
-ax2.gut <- gut.pcoa$eig[2]/sum(gut.pcoa$eig)
-ax3.gut <- gut.pcoa$eig[3]/sum(gut.pcoa$eig)
+map.alpha$Axis1.BC <- gut.pcoa$points[,1]
+map.alpha$Axis2.BC <- gut.pcoa$points[,2]
+ax1.bc.otu <- gut.pcoa$eig[1]/sum(gut.pcoa$eig)
+ax2.bc.otu <- gut.pcoa$eig[2]/sum(gut.pcoa$eig)
 
-plot_color <- rep('hotpink2', nrow(map_gut))
-plot_color[map_gut$treatment=='Infected'] <- "olivedrab3"
-
-map_gut$Animal <- as.character(map_gut$Animal)
-plot_color <- rep('black', nrow(map_gut))
-plot_color[map_gut$Animal=='Chicken'] <- "red"
-
-plot(gut.pcoa$points[,1], gut.pcoa$points[,2], bg=plot_color, pch=21,cex=2,
-     xlab=paste("PCoA1: ",100*round(ax1.gut,3),"% var. explained",sep=""), 
-     ylab=paste("PCoA2: ",100*round(ax2.gut,3),"% var. explained",sep=""))
+pcoa.BC <- ggplot(map.alpha, aes(x=Axis1.BC, y=Axis2.BC)) +
+  theme_classic() +
+  geom_point(aes(col=treatment, alpha=as.factor(time)), size=3)+
+  scale_color_manual(values = c('#00429d', '#93003a')) + 
+  #scale_alpha_continuous(range = c(0.1, 1)) + 
+  theme(legend.position = c(.5,.4),
+        legend.background = element_rect(fill="transparent"),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=10))+
+  labs(x=paste('PCoA1 (',100*round(ax1.bc.otu,3),'%)',sep=''),
+       y=paste('PCoA2 (',100*round(ax2.bc.otu,3),'%)', sep=''), 
+       color='Treatment', alpha='Time (day)')
 
 #are replicates different when you only compare the same times?
-adonis(gut.dist~map_gut$rep[map_gut$Animal=='Ferret'], strata=map_gut$time[map_gut$Animal=='Ferret']) #no significancy with time
-adonis(gut.dist~map_gut$time[map_gut$Animal=='Ferret']) #no significancy with time
-adonis(gut.dist~map_gut$Animal)
-adonis(gut.dist~map_gut$treatment, strata = map_gut$Animal) #no significancy with time
-adonis(gut.dist~map_gut$cage, strata = map_gut$treatment)
+adonis(gut.dist~map_ferret$rep, strata=map_ferret$time) #no significancy with time
+adonis(gut.dist~map_ferret$time) #no significancy with time
+adonis(gut.dist~map_ferret$treatment)
+adonis(gut.dist~map_ferret$treatment, strata = map_ferret$time) #no significancy with time
+adonis(gut.dist~map_ferret$time, strata = map_ferret$treatment)
+adonis(gut.dist~map_ferret$cage)
 
-gut.rel.abun <- decostand(otu_gut_rare, method="total", MARGIN=2) #calculating relative abundance
+#PCoA only time 3
+gut.time=otu_ferret_rare[,map_ferret$time == 3]
+map.time=map_ferret[map_ferret$time == 3,]
+gut.time.dist <- vegdist(t(gut.time), method="bray")
+gut.time.pcoa <- cmdscale(gut.time.dist, eig=TRUE)
+gut_envfit <- envfit(gut.time.pcoa, map.time)
+
+map.time$Axis1.BC <- gut.time.pcoa$points[,1]
+map.time$Axis2.BC <- gut.time.pcoa$points[,2]
+ax1.bc.otu <- gut.time.pcoa$eig[1]/sum(gut.time.pcoa$eig)
+ax2.bc.otu <- gut.time.pcoa$eig[2]/sum(gut.time.pcoa$eig)
+
+pcoa.time <- ggplot(map.time, aes(x=Axis1.BC, y=Axis2.BC)) +
+  theme_classic() +
+  geom_point(aes(col=treatment), size=3)+
+  scale_color_manual(values = c('#00429d', '#93003a')) + 
+  theme(legend.position = c(.5,.4),
+        legend.background = element_rect(fill="transparent"),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=10))+
+  labs(x=paste('PCoA1 (',100*round(ax1.bc.otu,3),'%)',sep=''),
+       y=paste('PCoA2 (',100*round(ax2.bc.otu,3),'%)', sep=''), 
+       color='Treatment')
+
+adonis(gut.time.dist~map.time$rep) 
+adonis(gut.time.dist~map.time$treatment)
+adonis(gut.time.dist~map.time$cage)
+adonis(gut.time.dist~map.time$treatment, strata = map.time$cage)
+adonis(gut.time.dist~map.time$cage, strata = map.time$treatment)
+
+#' 
+gut.rel.abun <- decostand(otu_ferret_rare, method="total", MARGIN=2) #calculating relative abundance
 gut_plot_taxa <- data.frame(OTUid=as.factor(rownames(gut.rel.abun)),gut.rel.abun) %>%
   gather(Sample.Name, abun, -OTUid) %>%
-  left_join(map_gut[,c('Sample.Name','treatment', 'cage', 'Animal', 'time')], by='Sample.Name') %>%
+  left_join(map_ferret, by='Sample.Name') %>%
   left_join(tax_gut_filt, by='OTUid') %>%
-  group_by(Animal,treatment,Class,Family) %>%
+  group_by(time,treatment,Phylum,Class,Family) %>%
   summarise(n_abun=sum(abun),
             n_samples=length(unique(Sample.Name)),
             rel_abun=n_abun/n_samples)
 
 ggplot(gut_plot_taxa,
-       aes(as.factor(treatment), rel_abun, fill=Class)) +
-  #geom_point(pch=21, size=3) +
+       aes(x=as.factor(treatment), y=rel_abun, fill=Class)) +
   geom_bar(stat = 'identity')+
-  facet_wrap(~Animal) +
   theme_bw()+
-  labs(y="Normalized Relative abundace", x= "Time") +
+  labs(y="Relative abundace", x= NULL) +
   theme(plot.title = element_text(hjust = 0.5),
         legend.text=element_text(size=6),
         legend.position = 'bottom') +
-  guides(fill=guide_legend(ncol=3)) +
-  theme(axis.text.x=element_text(angle = 45, hjust = 1))
+  facet_grid(~time)
+  #guides(fill=guide_legend(ncol=3))
 
 data.frame(OTUid=as.factor(rownames(gut.rel.abun)), gut.rel.abun) %>%
   gather(Sample.Name, abun, -OTUid) %>%
-  left_join(map_gut[,c('Sample.Name','treatment', 'cage', 'Animal', 'time')], by='Sample.Name') %>%
+  left_join(map_ferret, by='Sample.Name') %>%
   left_join(tax_gut_filt, by='OTUid') %>%
-  filter(OTUid=='OTU6') %>%
+  filter(Genus=='Campylobacter') %>%
   ggplot(aes(x=treatment, y=abun, color=treatment)) +
   geom_boxplot()+
-  facet_wrap(~Animal)+
   labs(y='Relative abundance')+
-  theme_classic()+
+  theme_bw()+
+  scale_color_manual(values = c('#00429d', '#93003a')) + 
   theme(plot.title = element_text(hjust = 0.5),
         legend.text=element_text(size=6),
         legend.position = 'bottom') +
-  guides(fill=guide_legend(ncol=3))
+  guides(fill=guide_legend(ncol=3))+
+  facet_grid(Genus~time)
   
-#install.packages("gplots")
+install.packages("gplots")
 library("gplots")
 library("devtools")
 source_url("https://raw.githubusercontent.com/obigriffith/biostar-tutorials/master/Heatmaps/heatmap.3.R")
 
-#install.packages('pheatmap')
+install.packages('pheatmap')
 library(pheatmap)
-otu_gut_rare<- otu_gut_rare[rowSums(otu_gut_rare)>0,]
-gut.rel.abun <- decostand(otu_gut_rare, method="total", MARGIN=2) #calculating relative abundance
 
-heat <- t(scale(t(gut.rel.abun)))
-pheatmap(heat)
+gut.rel.abun <- decostand(otu_ferret_rare, method="total", MARGIN=2) #calculating relative abundance
 
 tax_gut_filt$OTUid <- as.character(tax_gut_filt$OTUid)
 tax_gut_subset <- tax_gut_filt[tax_gut_filt$OTUid %in% rownames(gut.rel.abun),]
 tax_gut_subset <- tax_gut_subset[order(tax_gut_subset$OTUid),]
 gut.rel.abun <- gut.rel.abun[order(rownames(gut.rel.abun)),]
 
-rownames(gut.rel.abun) 
 tax_gut_subset$OTUid
 rownames(gut.rel.abun) <- tax_gut_subset$final_names
 
@@ -162,20 +234,19 @@ cal_z_score <- function(x){
   (x - mean(x)) / sd(x)
 }
 
-gut.rel.abun.high.abun <- gut.rel.abun[rowSums(gut.rel.abun)>.01,]
+gut.rel.abun.high.abun <- gut.rel.abun[rowSums(gut.rel.abun)>.001,]
 data_subset_norm <- t(apply(gut.rel.abun.high.abun, 1, cal_z_score))
 
-my_sample_col <- data.frame(sample = rep('grey', length(colnames(gut.rel.abun))))
-my_sample_col$sample[colnames(data_subset_norm) %in% map_gut$Sample.Name[map_gut$treatment=='Infected']] <- 'red'
-my_sample_col <- within(my_sample_col, sample <- ifelse(is.na(sample), 'infected', 'control'))
+my_sample_col <- data.frame(sample = rep('control', length(colnames(gut.rel.abun))))
+my_sample_col$sample[colnames(data_subset_norm) %in% map_ferret$Sample.Name[map_ferret$treatment=='Infected']] <- 'infected'
 row.names(my_sample_col) <- colnames(data_subset_norm)
-animal_col <- rep('Chicken', length(colnames(gut.rel.abun)))
-animal_col[colnames(data_subset_norm) %in% map_gut$Sample.Name[map_gut$Animal=='Ferret']] <- 'Ferret'
-my_sample_col$animal <- animal_col
+time_col <- rep('Day 3', length(colnames(gut.rel.abun)))
+time_col[colnames(data_subset_norm) %in% map_ferret$Sample.Name[map_ferret$time==1]] <- 'Day 1'
+my_sample_col$time <- time_col
 
 my_heatmap <- pheatmap(data_subset_norm, annotation_col = my_sample_col, cutree_rows = 2, cellwidth = 6, cellheight = 5, fontsize = 6, gaps_col = 6)
-my_heatmap <- pheatmap(gut.rel.abun, annotation_col = my_sample_col, cutree_cols = 3, cutree_rows = 2, cellwidth = 6, cellheight = 5, fontsize = 6)
-
+my_heatmap <- pheatmap(gut.rel.abun.high.abun, annotation_col = my_sample_col, cutree_cols = 3, cutree_rows = 2, cellwidth = 6, cellheight = 5, fontsize = 6)
+data_subset_norm[rownames(data_subset_norm)=='OTU6',]
 save_pheatmap_pdf <- function(x, filename, width=5, height=5) {
   stopifnot(!missing(x))
   stopifnot(!missing(filename))
@@ -195,11 +266,19 @@ map_gut_v2 <- map_gut
 rownames(map_gut_v2) <- map_gut_v2$Sample.Name
 names(map_gut_v2$Sample.Name) <- NULL
 
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("DESeq2")
 library(DESeq2)
 library(phyloseq)
-OTU = otu_table(otu_gut, taxa_are_rows = TRUE)
-TAX = tax_table(as.matrix(tax_gut_v2))
-SAM = sample_data(map_gut_v2)
+tax_ferret=tax_gut_filt[tax_gut_filt$OTUid %in% rownames(otu_ferret),]
+dim(tax_ferret)
+dim(otu_ferret)
+
+OTU = otu_table(otu_ferret, taxa_are_rows = TRUE)
+TAX = tax_table(as.matrix(tax_ferret))
+SAM = sample_data(map_ferret)
 physeq <- merge_phyloseq(phyloseq(OTU, TAX), SAM)
 
 #Infected Vs Control
