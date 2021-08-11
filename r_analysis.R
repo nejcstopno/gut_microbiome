@@ -50,7 +50,7 @@ map.div$Pielou <- pielou
 map.alpha <- melt(map.div, id.vars=c("time","rep", "Animal", 'treatment', 'Sample.Name', 'cage'), 
                   measure.vars=c("Richness", "Shannon", "Pielou"))
 
-ggplot(map.alpha,aes(y=value, x=as.factor(time), color=treatment))+
+alpha_diversity=ggplot(map.alpha,aes(y=value, x=as.factor(time), color=treatment))+
   theme_bw()+
   scale_color_manual(values = c('#00429d', '#93003a'), 
                      breaks = c('Control', 'Infected')) +
@@ -60,9 +60,9 @@ ggplot(map.alpha,aes(y=value, x=as.factor(time), color=treatment))+
 
 aov.richness <- aov(value ~ time+treatment+cage+time*treatment, #replace Richness with Shannon
                       data = map.alpha[map.alpha$variable == 'Pielou',]) 
-aov.shannon <- aov(value ~ treatment, #replace Richness with Shannon
+aov.shannon <- aov(value ~ time+treatment+cage+time*treatment, #replace Richness with Shannon
                     data = map.alpha[map.alpha$variable == 'Shannon',])
-aov.pielou <- aov(value ~ treatment, #replace Richness with Shannon
+aov.pielou <- aov(value ~ time+treatment+cage+time*treatment, #replace Richness with Shannon
                     data = map.alpha[map.alpha$variable == 'Pielou',])
 summary(aov.richness)
 summary(aov.shannon)
@@ -83,8 +83,7 @@ stat.test.shannon <- map.alpha %>%
   group_by(time) %>%
   filter(variable == 'Shannon') %>%
   t_test(value ~ treatment) %>%
-  adjust_pvalue(method = "BH") %>%
-  add_significance()
+  adjust_pvalue(method = "BH") 
 stat.test.shannon
 
 stat.test.pielou <- map.alpha %>%
@@ -158,7 +157,7 @@ adonis(gut.time.dist~map.time$cage)
 adonis(gut.time.dist~map.time$treatment, strata = map.time$cage)
 adonis(gut.time.dist~map.time$cage, strata = map.time$treatment)
 
-#' 
+#' Microbiome diversity representation
 gut.rel.abun <- decostand(otu_ferret_rare, method="total", MARGIN=2) #calculating relative abundance
 gut_plot_taxa <- data.frame(OTUid=as.factor(rownames(gut.rel.abun)),gut.rel.abun) %>%
   gather(Sample.Name, abun, -OTUid) %>%
@@ -235,16 +234,8 @@ save_pheatmap_pdf <- function(x, filename, width=5, height=5) {
 }
 save_pheatmap_pdf(my_heatmap, "heatmap_z_score_v3.pdf")
 
-#Campylobacter abundance 
-tax_gut_v2 <- tax_gut_filt
-rownames(tax_gut_v2) <- tax_gut_v2$OTUid
-names(tax_gut_v2$OTUid) <- NULL
-otu_gut_v2 <- otu_gut
-map_gut_v2 <- map_gut
-rownames(map_gut_v2) <- map_gut_v2$Sample.Name
-names(map_gut_v2$Sample.Name) <- NULL
-rownames(map_ferret)=map_ferret$Sample.Name
 
+#' Differentially abundant ZOTUs
 library(DESeq2)
 library(phyloseq)
 tax_ferret=tax_gut_filt[tax_gut_filt$OTUid %in% rownames(otu_ferret),]
